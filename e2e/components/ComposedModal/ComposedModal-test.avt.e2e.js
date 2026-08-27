@@ -125,6 +125,52 @@ test.describe('@avt ComposedModal', () => {
     ).toBeHidden();
   });
 
+  test('@avt-keyboard-nav Passive modal closes on the first Escape', async ({
+    page,
+  }) => {
+    await visitStory(page, {
+      component: 'ComposedModal',
+      id: 'components-composedmodal--passive-modal',
+      globals: {
+        theme: 'white',
+      },
+    });
+    // The close button is focused on open, which opens its tooltip. The tooltip
+    // stops the key press, so the modal has to catch it in the capture phase.
+    await expect(page.getByRole('button', { name: 'Close' })).toBeFocused();
+    await expect(page.getByRole('tooltip')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('.cds--modal.is-visible')).toHaveCount(0);
+  });
+
+  test('@avt-keyboard-nav enable-dialog-element closes on the first Escape', async ({
+    page,
+  }) => {
+    await visitStory(page, {
+      component: 'ComposedModal',
+      id: 'components-composedmodal-feature-flags--enable-dialog-element',
+      globals: {
+        theme: 'white',
+      },
+    });
+    const dialog = page.locator('dialog.cds--modal-container');
+    await expect(dialog).toBeVisible();
+    // The native dialog autofocuses the close button, which opens its tooltip.
+    // Assert the focus placement first so a change there does not surface as an
+    // unexplained missing tooltip.
+    await expect(page.getByRole('button', { name: 'Close' })).toBeFocused();
+    await expect(page.getByRole('tooltip')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    // The native dialog and the `.cds--modal` overlay must close together,
+    // otherwise the overlay is left covering an unclickable page
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('.cds--modal.is-visible')).toHaveCount(0);
+  });
+
   test('@avt-keyboard-nav With state manager', async ({ page }) => {
     await visitStory(page, {
       component: 'ComposedModal',

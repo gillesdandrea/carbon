@@ -163,4 +163,23 @@ test.describe('@avt Modal', () => {
     );
     expect(scrollTopAfterSecondTab).toBe(initialScrollTop);
   });
+  test('@avt-keyboard-nav Passive modal closes on the first Escape', async ({
+    page,
+  }) => {
+    await visitStory(page, {
+      component: 'Modal',
+      id: 'components-modal--passive-modal',
+      globals: {
+        theme: 'white',
+      },
+    });
+    // The close button is focused on open, which opens its tooltip. The tooltip
+    // stops the key press, so the modal has to catch it in the capture phase.
+    await expect(page.getByRole('button', { name: 'Close' })).toBeFocused();
+    await expect(page.getByRole('tooltip')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('.cds--modal.is-visible')).toHaveCount(0);
+  });
 });

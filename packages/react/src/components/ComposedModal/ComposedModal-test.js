@@ -9,6 +9,7 @@
 
 import React, { useRef, useState } from 'react';
 import {
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -24,7 +25,7 @@ import {
 import { FeatureFlags, useFeatureFlag } from '../FeatureFlags';
 import { ModalHeader } from './ModalHeader';
 import { ModalFooter } from './ModalFooter';
-import { TextInput, OverflowMenu, OverflowMenuItem } from '../../';
+import { TextInput, OverflowMenu, OverflowMenuItem, Tooltip } from '../../';
 import { AILabel, AILabelContent } from '../AILabel';
 
 const prefix = 'cds';
@@ -449,6 +450,139 @@ describe.each([
       await waitFor(() => {
         expect(focusElem).toHaveFocus();
       });
+    });
+
+    it('should close the modal when the dialog receives a close request', async () => {
+      const onClose = jest.fn();
+      render(
+        <FeatureFlags enableDialogElement>
+          <Component open onClose={onClose}>
+            <ModalHeader>Modal header</ModalHeader>
+            <ModalBody>This is the modal body content</ModalBody>
+          </Component>
+        </FeatureFlags>
+      );
+
+      const dialog = screen.getByRole('dialog', { hidden: true });
+      const cancelEvent = new Event('cancel', {
+        bubbles: false,
+        cancelable: true,
+      });
+      fireEvent(dialog, cancelEvent);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      // No visible overlay may be left behind. The plain variant drops
+      // `is-visible`, the presence variants unmount, so assert the property
+      // rather than either mechanism.
+      await waitFor(() => {
+        // eslint-disable-next-line testing-library/no-node-access
+        expect(
+          document.querySelectorAll('.cds--modal.is-visible')
+        ).toHaveLength(0);
+      });
+      // The default is prevented so the browser cannot close the dialog while
+      // React still considers the modal open
+      expect(cancelEvent.defaultPrevented).toBe(true);
+    });
+
+    it('should not close the modal when `onClose` returns false on a close request', () => {
+      const onClose = jest.fn(() => false);
+      render(
+        <FeatureFlags enableDialogElement>
+          <Component open onClose={onClose}>
+            <ModalHeader>Modal header</ModalHeader>
+            <ModalBody>This is the modal body content</ModalBody>
+          </Component>
+        </FeatureFlags>
+      );
+
+      const dialog = screen.getByRole('dialog', { hidden: true });
+      fireEvent(
+        dialog,
+        new Event('cancel', { bubbles: false, cancelable: true })
+      );
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('presentation', { hidden: true })).toHaveClass(
+        'is-visible'
+      );
+    });
+
+    it('should close even when `onClose` returns false if the close request cannot be cancelled', async () => {
+      const onClose = jest.fn(() => false);
+      render(
+        <FeatureFlags enableDialogElement>
+          <Component open onClose={onClose}>
+            <ModalHeader>Modal header</ModalHeader>
+            <ModalBody>This is the modal body content</ModalBody>
+          </Component>
+        </FeatureFlags>
+      );
+
+      // A close request is cancelable only while the dialog holds a close
+      // watcher the user paid for with an activation. Once that is spent the
+      // browser closes the dialog whatever we do, so the veto cannot stand and
+      // the overlay must not be left behind.
+      fireEvent(
+        screen.getByRole('dialog', { hidden: true }),
+        new Event('cancel', { bubbles: false, cancelable: false })
+      );
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        // eslint-disable-next-line testing-library/no-node-access
+        expect(
+          document.querySelectorAll('.cds--modal.is-visible')
+        ).toHaveLength(0);
+      });
+    });
+
+    it('should not close the modal when a decorator popover consumes ESC', async () => {
+      const onClose = jest.fn();
+      const aiLabel = (
+        <AILabel className="ai-label-container">
+          <AILabelContent>
+            <p>AI Explained</p>
+          </AILabelContent>
+        </AILabel>
+      );
+
+      render(
+        <FeatureFlags enableDialogElement>
+          <Component open onClose={onClose} decorator={aiLabel}>
+            <ModalHeader>Modal header</ModalHeader>
+            <ModalBody>
+              <TextInput
+                data-modal-primary-focus
+                id="text-input-1"
+                labelText="Domain name"
+              />
+            </ModalBody>
+            <ModalFooter primaryButtonText="Add" secondaryButtonText="Cancel" />
+          </Component>
+        </FeatureFlags>
+      );
+
+      const aiLabelButton = screen.getByRole('button', {
+        name: /AI Show information/i,
+      });
+      await userEvent.click(aiLabelButton);
+      await waitFor(() => {
+        expect(aiLabelButton).toHaveAttribute('aria-expanded', 'true');
+      });
+
+      const escape = createEvent.keyDown(aiLabelButton, {
+        key: 'Escape',
+        code: 'Escape',
+        keyCode: 27,
+      });
+      fireEvent(aiLabelButton, escape);
+
+      expect(aiLabelButton).toHaveAttribute('aria-expanded', 'false');
+      expect(onClose).not.toHaveBeenCalled();
+      // The default is prevented so the browser does not act on the same key
+      // press as a close request for the native dialog
+      expect(escape.defaultPrevented).toBe(true);
     });
   });
 
@@ -876,6 +1010,67 @@ describe.each([
     fireEvent.keyDown(document, { key: 'Escape', code: 'Escape', keyCode: 27 });
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('should close on the first ESC press when the close button holds focus', async () => {
+    const onClose = jest.fn();
+
+    render(
+      <Component open onClose={onClose}>
+        <ModalHeader>Modal header</ModalHeader>
+        <ModalBody>This is the modal body content</ModalBody>
+      </Component>
+    );
+
+    // A passive modal has no primary focus target, so the close button is
+    // focused on open and its tooltip opens with it. The tooltip stops the key
+    // press, so the modal has to catch it in the capture phase.
+    expect(screen.getByRole('button', { name: /close/i })).toHaveFocus();
+    expect(screen.getByRole('tooltip')).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('should let a popover the user opened handle ESC first', async () => {
+    const onClose = jest.fn();
+    const aiLabel = (
+      <AILabel className="ai-label-container">
+        <AILabelContent>
+          <p>AI Explained</p>
+        </AILabelContent>
+      </AILabel>
+    );
+
+    render(
+      <Component open onClose={onClose} decorator={aiLabel}>
+        <ModalHeader>Modal header</ModalHeader>
+        <ModalBody>
+          <TextInput
+            data-modal-primary-focus
+            id="text-input-1"
+            labelText="Domain name"
+          />
+        </ModalBody>
+        <ModalFooter primaryButtonText="Add" secondaryButtonText="Cancel" />
+      </Component>
+    );
+
+    const aiLabelButton = screen.getByRole('button', {
+      name: /AI Show information/i,
+    });
+    await userEvent.click(aiLabelButton);
+    await waitFor(() => {
+      expect(aiLabelButton).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    // The capture-phase handler is scoped to the close button, so a press that
+    // starts inside the decorator is left to the popover
+    await userEvent.keyboard('{Escape}');
+
+    expect(aiLabelButton).toHaveAttribute('aria-expanded', 'false');
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe('state', () => {
@@ -1075,10 +1270,9 @@ describe('state with presence context', () => {
     expect(screen.queryByTestId('sibling-modal')).toBeInTheDocument();
     expect(screen.queryByTestId('child-modal')).toBeInTheDocument();
 
-    // First ESC closes the tooltip in the child modal
-    await userEvent.keyboard('{Escape}');
-
-    // Second ESC closes the child modal
+    // The child modal's close button holds focus, so its tooltip is open and
+    // stops the key press. The modal catches it in the capture phase, so a
+    // single press still closes the child modal.
     await userEvent.keyboard('{Escape}');
 
     // Wait for child modal to be removed

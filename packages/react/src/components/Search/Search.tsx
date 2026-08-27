@@ -230,12 +230,22 @@ const Search = React.forwardRef<HTMLInputElement, SearchProps>(
 
     function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
       if (match(event, keys.Escape)) {
-        event.stopPropagation();
-        if (inputRef.current?.value) {
-          clearInput();
-        }
+        const hasValue = !!inputRef.current?.value;
         // ExpandableSearch closes on escape when isExpanded, focus search activation button
-        else if (onExpand && isExpanded) {
+        const collapses = !hasValue && !!onExpand && isExpanded;
+
+        if (hasValue || collapses) {
+          // Consume the press only when the search acts on it. Cancelling it as
+          // well as stopping it keeps a native `<dialog>` ancestor from
+          // treating a press this search handled as a close request, while an
+          // Escape the search ignores stays available to the rest of the page.
+          event.preventDefault();
+          event.stopPropagation();
+        }
+
+        if (hasValue) {
+          clearInput();
+        } else if (collapses) {
           expandButtonRef.current?.focus();
         }
       }

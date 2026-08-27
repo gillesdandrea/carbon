@@ -18,6 +18,7 @@ import React, {
   type MouseEvent,
   type ReactNode,
   type RefObject,
+  type SyntheticEvent,
 } from 'react';
 import { useResizeObserver } from '../../internal/useResizeObserver';
 import PropTypes from 'prop-types';
@@ -458,10 +459,30 @@ const ComposedModalDialog = React.forwardRef<
     currentActiveNode.scrollIntoView({ block: 'center' });
   }
 
-  function closeModal(evt) {
-    if (!onClose || onClose(evt) !== false) {
+  // `force` closes even when `onClose` returns `false`, for a close request the
+  // browser will not let the page cancel.
+  function closeModal(evt, force = false) {
+    if (!onClose || onClose(evt) !== false || force) {
       setIsOpen(false);
     }
+  }
+
+  function handleDialogCancel(evt: SyntheticEvent<HTMLDialogElement>) {
+    if (!evt.cancelable) {
+      // A close request is cancelable only while the dialog holds a close
+      // watcher the user has paid for with an activation. Once that is spent,
+      // the browser closes the `<dialog>` whatever this handler does, so
+      // `onClose` cannot veto it. Follow the DOM rather than leaving the
+      // overlay mounted over a dialog that has already gone.
+      closeModal(evt, true);
+      return;
+    }
+
+    // Otherwise cancel the browser's close request and route it through the
+    // same path as the close button, so React stays the source of truth and
+    // `onClose` can still prevent the close by returning `false`.
+    evt.preventDefault();
+    closeModal(evt);
   }
 
   const modalClass = cx(
@@ -517,7 +538,37 @@ const ComposedModalDialog = React.forwardRef<
   useEffect(() => {
     if (!open) return;
 
+    // A press that starts on this modal's own close button never reaches the
+    // bubble-phase listener below. The modal focuses that button when it opens,
+    // which opens the button's tooltip, and `Tooltip` stops Escape without
+    // cancelling it. Catch that one case in the capture phase, before anything
+    // can stop it. A layer the user opened themselves — a toggletip, a popover,
+    // a menu — is somewhere else in the modal and still handles Escape first.
+    let handledInCapture: Event | null = null;
+
+    const handleEscapeCapture = (event) => {
+      const { target } = event;
+
+      if (
+        !match(event, keys.Escape) ||
+        !(target instanceof Element) ||
+        !target.closest(`.${prefix}--modal-close`) ||
+        !isTopmostVisibleModal(modalRef.current, prefix)
+      ) {
+        return;
+      }
+
+      handledInCapture = event;
+      event.preventDefault();
+      closeModal(event);
+    };
+
     const handleEscapeKey = (event) => {
+      if (event === handledInCapture) {
+        handledInCapture = null;
+        return;
+      }
+
       if (
         match(event, keys.Escape) &&
         isTopmostVisibleModal(modalRef.current, prefix)
@@ -526,9 +577,12 @@ const ComposedModalDialog = React.forwardRef<
         closeModal(event);
       }
     };
+
+    document.addEventListener('keydown', handleEscapeCapture, true);
     document.addEventListener('keydown', handleEscapeKey);
 
     return () => {
+      document.removeEventListener('keydown', handleEscapeCapture, true);
       document.removeEventListener('keydown', handleEscapeKey);
     };
     // eslint-disable-next-line  react-hooks/exhaustive-deps -- https://github.com/carbon-design-system/carbon/issues/20452
@@ -603,6 +657,7 @@ const ComposedModalDialog = React.forwardRef<
       open={open}
       focusAfterCloseRef={launcherButtonRef}
       modal
+      onCancel={handleDialogCancel}
       className={containerClass}
       aria-label={ariaLabel ? ariaLabel : generatedAriaLabel}
       aria-labelledby={ariaLabelledBy}

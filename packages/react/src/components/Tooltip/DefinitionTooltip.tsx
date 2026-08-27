@@ -98,6 +98,10 @@ const DefinitionTooltip = ({
       event.preventDefault();
       setOpen(!isOpen);
     } else if (isOpen && match(event, keys.Escape)) {
+      // Preventing the default action tells the platform's close request
+      // machinery — a native `<dialog>`, for example — that this key press has
+      // already been handled, so it does not act on it a second time.
+      event.preventDefault();
       event.stopPropagation();
       setOpen(false);
     }

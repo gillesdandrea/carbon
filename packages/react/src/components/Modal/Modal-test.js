@@ -7,6 +7,7 @@
 
 import React, { useRef, useState } from 'react';
 import {
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -20,6 +21,7 @@ import { AILabel, AILabelContent } from '../AILabel';
 import { FeatureFlags } from '../FeatureFlags';
 import { ModalPresence, withModalPresence } from './ModalPresence';
 import OverflowMenu from '../OverflowMenu';
+import { Tooltip } from '../Tooltip';
 import OverflowMenuItem from '../OverflowMenuItem';
 import { MenuButton } from '../MenuButton';
 import { MenuItem } from '../Menu';
@@ -1669,6 +1671,81 @@ describe.each([
 
     await userEvent.keyboard('{Escape}');
     expect(onRequestClose).toHaveBeenCalled();
+  });
+
+  it('should close on the first ESC press when the close button holds focus', async () => {
+    const onRequestClose = jest.fn();
+
+    render(
+      <Component
+        open
+        passiveModal
+        modalHeading="Add a custom domain"
+        onRequestClose={onRequestClose}>
+        <p>Modal content</p>
+      </Component>
+    );
+
+    // A passive modal has no primary focus target, so the close button is
+    // focused on open and its tooltip opens with it. The tooltip stops the key
+    // press, so the modal has to catch it in the capture phase.
+    expect(screen.getByRole('button', { name: /close/i })).toHaveFocus();
+    expect(screen.getByRole('tooltip')).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('should close the modal when the dialog receives a close request', () => {
+    const onRequestClose = jest.fn();
+
+    render(
+      <FeatureFlags enableDialogElement>
+        <Component
+          open
+          modalHeading="Add a custom domain"
+          onRequestClose={onRequestClose}>
+          <p>Modal content</p>
+        </Component>
+      </FeatureFlags>
+    );
+
+    const cancelEvent = new Event('cancel', {
+      bubbles: false,
+      cancelable: true,
+    });
+    fireEvent(screen.getByRole('dialog'), cancelEvent);
+
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+    // The default is prevented so the browser cannot close the dialog while
+    // React still considers the modal open
+    expect(cancelEvent.defaultPrevented).toBe(true);
+  });
+
+  it('should still report a close request that cannot be cancelled', () => {
+    const onRequestClose = jest.fn();
+
+    render(
+      <FeatureFlags enableDialogElement>
+        <Component
+          open
+          modalHeading="Add a custom domain"
+          onRequestClose={onRequestClose}>
+          <p>Modal content</p>
+        </Component>
+      </FeatureFlags>
+    );
+
+    // Once the dialog's close watcher has spent its user activation the browser
+    // closes the dialog whatever this handler does. The request still has to
+    // reach React, or the overlay is left over a dialog that has gone.
+    fireEvent(
+      screen.getByRole('dialog'),
+      new Event('cancel', { bubbles: false, cancelable: false })
+    );
+
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -213,6 +213,53 @@ describe('Search', () => {
       expect(screen.getAllByRole('button')[0]).toHaveFocus();
     });
 
+    it('should cancel the Escape key press it consumes', async () => {
+      let escapeEvent = null;
+      const capture = (event) => {
+        if (event.key === 'Escape') {
+          escapeEvent = event;
+        }
+      };
+      document.addEventListener('keydown', capture, true);
+
+      try {
+        render(<Search labelText="test-search" defaultValue="test" />);
+
+        screen.getByRole('searchbox').focus();
+        await userEvent.keyboard('[Escape]');
+
+        // Search stops the key press, so a native `<dialog>` ancestor must not
+        // be left to act on it as a close request
+        expect(escapeEvent).not.toBeNull();
+        expect(escapeEvent.defaultPrevented).toBe(true);
+      } finally {
+        document.removeEventListener('keydown', capture, true);
+      }
+    });
+
+    it('should leave an Escape key press it ignores alone', async () => {
+      let escapeEvent = null;
+      const capture = (event) => {
+        if (event.key === 'Escape') {
+          escapeEvent = event;
+        }
+      };
+      document.addEventListener('keydown', capture, true);
+
+      try {
+        // Empty and not expandable, so there is nothing for Escape to do here
+        render(<Search labelText="test-search" />);
+
+        screen.getByRole('searchbox').focus();
+        await userEvent.keyboard('[Escape]');
+
+        expect(escapeEvent).not.toBeNull();
+        expect(escapeEvent.defaultPrevented).toBe(false);
+      } finally {
+        document.removeEventListener('keydown', capture, true);
+      }
+    });
+
     it('should have tabbable button and untabbable input if expandable and not expanded', async () => {
       const { container } = render(
         <Search

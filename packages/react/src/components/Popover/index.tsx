@@ -284,10 +284,19 @@ export const Popover: PopoverComponent & {
     const target = event.target;
     if (
       !(target instanceof Element) ||
+      // Without a `PopoverContent` there is no content to have focus inside of,
+      // and `closest()` would otherwise match the null ref
+      !refs.floating.current ||
       target.closest(`.${prefix}--popover-content`) !== refs.floating.current
     ) {
       return;
     }
+    // Cancel the key press so a native `<dialog>` ancestor does not also treat
+    // it as a close request. Note this listener is on `window`, so inside a
+    // `Modal` the modal's own `document` listener has already run and canceled
+    // the event, and the `defaultPrevented` guard above returned early. This
+    // only takes effect for a popover inside a bare `Dialog`.
+    event.preventDefault();
     onRequestClose?.();
 
     // return focus to the trigger while making sure it is tabbable

@@ -142,6 +142,10 @@ export function Toggletip<E extends ElementType = 'span'>({
 
   const onKeyDown: KeyboardEventHandler = (event) => {
     if (open && match(event, keys.Escape)) {
+      // Preventing the default action tells the platform's close request
+      // machinery — a native `<dialog>`, for example — that this key press has
+      // already been handled, so it does not act on it a second time.
+      event.preventDefault();
       event.stopPropagation();
       actions.close();
 

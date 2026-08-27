@@ -437,6 +437,20 @@ const ModalDialog = React.forwardRef(function ModalDialog(
     }
   }
 
+  function handleDialogCancel(evt: React.SyntheticEvent<HTMLDialogElement>) {
+    // A close request is cancelable only while the dialog holds a close watcher
+    // the user has paid for with an activation. Once that is spent the browser
+    // closes the `<dialog>` whatever this handler does, so only cancel the
+    // request when cancelling can actually work.
+    if (evt.cancelable) {
+      evt.preventDefault();
+    }
+
+    // Either way the request has to reach React, or the `.cds--modal` overlay
+    // is left mounted over a dialog that has already gone.
+    onRequestClose(evt);
+  }
+
   function handleBlur({
     target: oldActiveNode,
     relatedTarget: currentActiveNode,
@@ -589,7 +603,37 @@ const ModalDialog = React.forwardRef(function ModalDialog(
   useEffect(() => {
     if (!open) return;
 
+    // A press that starts on this modal's own close button never reaches the
+    // bubble-phase listener below. The modal focuses that button when it opens,
+    // which opens the button's tooltip, and `Tooltip` stops Escape without
+    // cancelling it. Catch that one case in the capture phase, before anything
+    // can stop it. A layer the user opened themselves — a toggletip, a popover,
+    // a menu — is somewhere else in the modal and still handles Escape first.
+    let handledInCapture: Event | null = null;
+
+    const handleEscapeCapture = (event) => {
+      const { target } = event;
+
+      if (
+        !match(event, keys.Escape) ||
+        !(target instanceof Element) ||
+        !target.closest(`.${prefix}--modal-close`) ||
+        !isTopmostVisibleModal(modalRef.current, prefix)
+      ) {
+        return;
+      }
+
+      handledInCapture = event;
+      event.preventDefault();
+      onRequestClose(event);
+    };
+
     const handleEscapeKey = (event) => {
+      if (event === handledInCapture) {
+        handledInCapture = null;
+        return;
+      }
+
       if (
         match(event, keys.Escape) &&
         isTopmostVisibleModal(modalRef.current, prefix)
@@ -598,9 +642,12 @@ const ModalDialog = React.forwardRef(function ModalDialog(
         onRequestClose(event);
       }
     };
+
+    document.addEventListener('keydown', handleEscapeCapture, true);
     document.addEventListener('keydown', handleEscapeKey);
 
     return () => {
+      document.removeEventListener('keydown', handleEscapeCapture, true);
       document.removeEventListener('keydown', handleEscapeKey);
     };
     // eslint-disable-next-line  react-hooks/exhaustive-deps -- https://github.com/carbon-design-system/carbon/issues/20452
@@ -737,6 +784,7 @@ const ModalDialog = React.forwardRef(function ModalDialog(
       open={open}
       focusAfterCloseRef={launcherButtonRef}
       modal
+      onCancel={handleDialogCancel}
       ref={innerModal}
       role={isAlertDialog ? 'alertdialog' : undefined}
       aria-describedby={isAlertDialog ? modalBodyId : undefined}
